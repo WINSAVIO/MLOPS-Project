@@ -47,6 +47,140 @@ FLOW_DIRECTIONS = [
 ]
 
 # ---------------------------------------------------------------------------
+# State name matching — handles both English-only and bilingual formats,
+# and gracefully skips entities not present in a given PDF (e.g. RIL_Jamnagar
+# pre-Dec 2024, Tripura / Railways_ER in very early 2023 PDFs).
+# ---------------------------------------------------------------------------
+
+def _strip_devanagari(text):
+    if not text:
+        return ""
+    return re.sub(r"[\u0900-\u097F\u0964\u0965]+", " ", str(text))
+
+def _english_part(text):
+    """Strip Devanagari, collapse whitespace, return lowercase English portion."""
+    return re.sub(r"\s+", " ", _strip_devanagari(text)).strip().lower()
+
+# Canonical lookup: every recognisable variant -> canonical state name
+_STATE_ALIASES = {
+    "punjab":              "Punjab",
+    "haryana":             "Haryana",
+    "rajasthan":           "Rajasthan",
+    "delhi":               "Delhi",
+    "up":                  "UP",
+    "uttar pradesh":       "UP",
+    "uttarakhand":         "Uttarakhand",
+    "hp":                  "HP",
+    "himachal pradesh":    "HP",
+    "j&k":                 "J&K",
+    "jammu":               "J&K",
+    "chandigarh":          "Chandigarh",
+    "railways_nr":         "Railways_NR",
+    "railways nr":         "Railways_NR",
+    "railways_nr ists":    "Railways_NR",
+    "chhattisgarh":        "Chhattisgarh",
+    "gujarat":             "Gujarat",
+    "mp":                  "MP",
+    "madhya pradesh":      "MP",
+    "maharashtra":         "Maharashtra",
+    "goa":                 "Goa",
+    "dnhddpdcl":           "DNHDDPDCL",
+    "dadra":               "DNHDDPDCL",
+    "dnh":                 "DNHDDPDCL",
+    "amnsil":              "AMNSIL",
+    "arcelormittal":       "AMNSIL",
+    "balco":               "BALCO",
+    "bharat aluminium":    "BALCO",
+    "ril jamnagar":        "RIL_Jamnagar",
+    "ril":                 "RIL_Jamnagar",
+    "jamnagar":            "RIL_Jamnagar",
+    "andhra pradesh":      "Andhra Pradesh",
+    "andhra":              "Andhra Pradesh",
+    "telangana":           "Telangana",
+    "karnataka":           "Karnataka",
+    "kerala":              "Kerala",
+    "tamil nadu":          "Tamil Nadu",
+    "tamilnadu":           "Tamil Nadu",
+    "pondy":               "Pondy",
+    "pondicherry":         "Pondy",
+    "puducherry":          "Pondy",
+    "puducheri":           "Pondy",
+    "bihar":               "Bihar",
+    "dvc":                 "DVC",
+    "damodar":             "DVC",
+    "jharkhand":           "Jharkhand",
+    "odisha":              "Odisha",
+    "orissa":              "Odisha",
+    "west bengal":         "West Bengal",
+    "westbengal":          "West Bengal",
+    "sikkim":              "Sikkim",
+    "railways_er":         "Railways_ER",
+    "railways er":         "Railways_ER",
+    "railways_er ists":    "Railways_ER",
+    "arunachal pradesh":   "Arunachal Pradesh",
+    "arunachal":           "Arunachal Pradesh",
+    "assam":               "Assam",
+    "manipur":             "Manipur",
+    "meghalaya":           "Meghalaya",
+    "mizoram":             "Mizoram",
+    "nagaland":            "Nagaland",
+    "tripura":             "Tripura",
+}
+
+# Also try partial matches for longer names (e.g. "Arunachal" inside "Arunachal Pradesh")
+_PARTIAL_ALIASES = {
+    "arunachal":    "Arunachal Pradesh",
+    "andhra":       "Andhra Pradesh",
+    "west bengal":  "West Bengal",
+    "tamil":        "Tamil Nadu",
+    "himachal":     "HP",
+    "damodar":      "DVC",
+    "ril":          "RIL_Jamnagar",
+}
+
+def _identify_state(cell_text):
+    """
+    Try to identify which canonical state a cell text refers to.
+    Returns canonical state name or None.
+    """
+    eng = _english_part(cell_text)
+    if not eng:
+        return None
+    # Skip ALL_INDIA rows
+    if "all india" in eng or "all_india" in eng:
+        return None
+    # Exact match first
+    if eng in _STATE_ALIASES:
+        return _STATE_ALIASES[eng]
+    # Try stripping trailing footnote markers (e.g. "railways_er ists*")
+    eng_clean = eng.rstrip("*").strip()
+    if eng_clean in _STATE_ALIASES:
+        return _STATE_ALIASES[eng_clean]
+    # Partial: check if any alias is a substring of the cell text
+    for alias, canonical in _STATE_ALIASES.items():
+        if len(alias) > 3 and alias in eng:
+            return canonical
+    return None
+
+
+def _build_state_row_map(raw, state_col=1, value_start_col=2):
+    """
+    Scan all rows of a raw table and build {canonical_state: row} dict.
+    Skips header rows, ALL_INDIA rows, and footnote rows.
+    state_col  = column index containing the state name
+    value_start_col = column where numeric date values begin
+    """
+    state_map = {}
+    for row in raw:
+        if not row or len(row) <= state_col:
+            continue
+        state = _identify_state(row[state_col])
+        if state and state not in state_map:
+            state_map[state] = row
+    return state_map
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
@@ -79,17 +213,19 @@ def _empty(cols):
     return pd.DataFrame(columns=cols)
 
 # ---------------------------------------------------------------------------
-# T1
+# T1 — Evening Demand Met & Shortage  (MW, 19:00/20:00 hrs)
+# Page 2 — dynamic row detection handles old and new format
 # ---------------------------------------------------------------------------
 
 _T1_COLS = ["Date", "Region", "EveningDemand_MW", "EveningShortage_MW"]
-_REGIONS = ["NR", "WR", "SR", "ER", "NER", "ALL"]
+_REGIONS  = ["NR", "WR", "SR", "ER", "NER", "ALL"]
+
 
 def _date_row_groups(raw):
     """
-    Collect all date rows from a page-2 merged table and split into 3 groups of 7.
+    Collect all date rows from a page-2 merged table and split into 3 groups.
     Old PDFs have an extra units row pushing data down, new ones don't.
-    By scanning for actual date rows we handle both layouts automatically.
+    Scanning for actual date rows handles both layouts automatically.
     """
     date_rows = [row for row in raw if row and row[0] and _is_date(row[0])]
     return date_rows[:7], date_rows[7:14], date_rows[14:21]
@@ -107,6 +243,12 @@ def _parse_t1(raw):
     return pd.DataFrame(records) if records else _empty(_T1_COLS)
 
 
+# ---------------------------------------------------------------------------
+# T2 — Energy Met & Hydro Generation  (MU)
+# ---------------------------------------------------------------------------
+
+_T2_COLS = ["Date", "Region", "EnergyMet_MU", "HydroGen_MU"]
+
 def _parse_t2(raw):
     _, g2, _ = _date_row_groups(raw)
     records = []
@@ -115,9 +257,16 @@ def _parse_t2(raw):
         for i, region in enumerate(_REGIONS):
             records.append({"Date": date, "Region": region,
                             "EnergyMet_MU": _cell(row, 1 + i*2),
-                            "HydroGen_MU": _cell(row, 2 + i*2)})
+                            "HydroGen_MU":  _cell(row, 2 + i*2)})
     return pd.DataFrame(records) if records else _empty(_T2_COLS)
 
+
+# ---------------------------------------------------------------------------
+# T3 — All-India Grid Frequency
+# ---------------------------------------------------------------------------
+
+_T3_COLS = ["Date", "Freq_4980_4990_pct", "Freq_below_4990_pct",
+            "Freq_4990_5005_pct", "Freq_above_5005_pct", "AvgFreq_Hz", "FreqVariationIndex"]
 
 def _parse_t3(raw):
     _, _, g3 = _date_row_groups(raw)
@@ -133,59 +282,77 @@ def _parse_t3(raw):
     return pd.DataFrame(records) if records else _empty(_T3_COLS)
 
 
+# ---------------------------------------------------------------------------
+# T4 — State-wise Max Demand Met & Peak Hour Shortage  (MW)
+# Page 3 — NAME-BASED matching avoids ALL_INDIA bleed and missing-state bugs
+# ---------------------------------------------------------------------------
+
+_T4_COLS = ["Date", "Region", "State", "MaxDemand_MW", "PeakShortage_MW"]
 
 def _parse_t4(raw):
+    # In T4, dates run across the TOP (row 1 in both old/new),
+    # state names are in col1, values start at col2
     dates = _dates_from_rows(raw)
+    state_map = _build_state_row_map(raw, state_col=1, value_start_col=2)
+
     records = []
-    def _is_num(v):
-        try: float(str(v).replace(',','').strip()); return True
-        except: return False
-    # Skip title/header rows: real data rows have a numeric value in r[2]
-    data_rows = [r for r in raw[2:] if r and len(r) > 2 and r[1] and str(r[1]).strip() and _is_num(r[2])]
-    for i, row in enumerate(data_rows):
-        if i >= len(STATES_ORDERED):
-            break
-        state = STATES_ORDERED[i]
+    for state in STATES_ORDERED:
+        row = state_map.get(state)
+        if row is None:
+            continue
         region = STATE_TO_REGION.get(state, "")
         for d_idx, date in enumerate(dates):
             records.append({"Date": date, "Region": region, "State": state,
-                            "MaxDemand_MW": _cell(row, 2 + d_idx*2),
+                            "MaxDemand_MW":    _cell(row, 2 + d_idx*2),
                             "PeakShortage_MW": _cell(row, 3 + d_idx*2)})
     return pd.DataFrame(records) if records else _empty(_T4_COLS)
 
+
 # ---------------------------------------------------------------------------
-# T5
+# T5 — State-wise Energy Consumption  (MU)
+# Page 4 — NAME-BASED matching (same fix)
 # ---------------------------------------------------------------------------
 
 _T5_COLS = ["Date", "Region", "State", "Energy_Consumption_MU"]
 
 def _parse_t5(raw):
     dates = _dates_from_rows(raw)
+    state_map = _build_state_row_map(raw, state_col=1, value_start_col=2)
+
     records = []
-    data_rows = raw[2:-1]
-    for i, row in enumerate(data_rows):
-        if i >= len(STATES_ORDERED):
-            break
-        state = STATES_ORDERED[i]
+    for state in STATES_ORDERED:
+        row = state_map.get(state)
+        if row is None:
+            continue
         region = STATE_TO_REGION.get(state, "")
         for d_idx, date in enumerate(dates):
             records.append({"Date": date, "Region": region, "State": state,
                             "Energy_Consumption_MU": _cell(row, 2 + d_idx)})
-    if raw:
-        last = raw[-1]
+
+    # ALL_INDIA total — find the row explicitly by looking for "all india" text in col0
+    all_india_row = None
+    for row in raw:
+        if row and row[0] and "all india" in _english_part(row[0]).lower():
+            all_india_row = row
+            break
+    if all_india_row is not None:
         for d_idx, date in enumerate(dates):
             records.append({"Date": date, "Region": "ALL", "State": "ALL_INDIA",
-                            "Energy_Consumption_MU": _cell(last, 2 + d_idx)})
+                            "Energy_Consumption_MU": _cell(all_india_row, 2 + d_idx)})
+
     return pd.DataFrame(records) if records else _empty(_T5_COLS)
 
+
 # ---------------------------------------------------------------------------
-# T6
+# T6 — International Power Exchange  (MU / MW)
 # ---------------------------------------------------------------------------
 
-_T6_COLS = ["Date",
-            "Bhutan_Exchange_MU", "Bhutan_DayPeak_MW", "Bhutan_DayAvg_MW",
-            "Nepal_Exchange_MU",  "Nepal_DayPeak_MW",  "Nepal_DayAvg_MW",
-            "Bangladesh_Exchange_MU", "Bangladesh_DayPeak_MW", "Bangladesh_DayAvg_MW"]
+_T6_COLS = [
+    "Date",
+    "Bhutan_Exchange_MU", "Bhutan_DayPeak_MW", "Bhutan_DayAvg_MW",
+    "Nepal_Exchange_MU",  "Nepal_DayPeak_MW",  "Nepal_DayAvg_MW",
+    "Bangladesh_Exchange_MU", "Bangladesh_DayPeak_MW", "Bangladesh_DayAvg_MW",
+]
 _COUNTRIES = ["Bhutan", "Nepal", "Bangladesh"]
 
 def _parse_t6(raw):
@@ -201,53 +368,39 @@ def _parse_t6(raw):
         records.append(rec)
     return pd.DataFrame(records) if records else _empty(_T6_COLS)
 
+
 # ---------------------------------------------------------------------------
-# T7  — COLUMN-ORIENTED: dates are column headers, flow directions are rows
-#
-# Page 6 layout:
-#   raw[0] : title row
-#   raw[1] : [date_label, 02-03-2026, 03-03-2026, ..., 08-03-2026]
-#   raw[2] : [East_to_North (Hindi\nEnglish), -67.7, -60.2, ...]
-#   raw[3] : [East_to_West ..., ...]
-#   ...
+# T7 — Inter-regional Exchange  (MU)
+# Page 6 — COLUMN-ORIENTED: dates across top, flow directions down side
+# Scans for the date header row (handles extra title rows in old PDFs)
 # ---------------------------------------------------------------------------
 
 _T7_COLS = ["Date", "FlowDirection", "Exchange_MU"]
 
 def _parse_t7(raw):
-    """
-    T7 is column-oriented: dates run across the top, flow directions down the side.
-    Old PDFs have 1-2 extra title rows before the date header row.
-    We scan every row to find the one whose columns 1+ are dates.
-    """
     if not raw or len(raw) < 3:
         return _empty(_T7_COLS)
-
-    # Find the header row — the one where column 1 is a date
     header_idx = None
     for i, row in enumerate(raw):
         if row and len(row) > 1 and _is_date(row[1]):
             header_idx = i
             break
-
     if header_idx is None:
         return _empty(_T7_COLS)
-
     dates = [str(c).strip() for c in raw[header_idx][1:] if _is_date(c)]
     if not dates:
         return _empty(_T7_COLS)
-
     records = []
-    data_rows = raw[header_idx + 1:]
     for i, flow in enumerate(FLOW_DIRECTIONS):
-        if i >= len(data_rows):
+        data_idx = header_idx + 1 + i
+        if data_idx >= len(raw):
             break
-        row = data_rows[i]
+        row = raw[data_idx]
         for d_idx, date in enumerate(dates):
             records.append({"Date": date, "FlowDirection": flow,
                             "Exchange_MU": _cell(row, 1 + d_idx)})
-
     return pd.DataFrame(records) if records else _empty(_T7_COLS)
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -258,6 +411,9 @@ def parse_pdf(pdf_path):
     Parse a single GRID-INDIA weekly PDF.
     Returns dict with keys t1..t7, or None if the file cannot be opened.
     Every returned DataFrame is guaranteed to have a Date column.
+    State assignment in T4/T5 uses name-based matching (not positional),
+    so missing entities (e.g. RIL_Jamnagar pre-Dec 2024) are simply absent
+    rather than corrupting neighbouring states.
     """
 
     def _safe_extract(page, label):

@@ -1,0 +1,32 @@
+# ==========================================
+# 1. Python & Virtual Environments
+# ==========================================
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ==========================================
+# 2. Jupyter Notebooks
+# ==========================================
+.ipynb_checkpoints/
+
+# ==========================================
+# 3. Data & Raw Files
+# ==========================================
+# Ignore the folder containing raw uncompressed PDFs
+weekly_pdfs/
+*.pdf
+
+# Allow the compressed data file and extracted CSV to be tracked
+!data.rar
+!nldc_psp_maharashtra_weekly.csv
+
+# ==========================================
+# 4. OS Generated Files
+# ==========================================
+.DS_Store
+Thumbs.dbs
