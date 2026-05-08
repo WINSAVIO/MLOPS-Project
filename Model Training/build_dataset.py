@@ -215,6 +215,23 @@ def main():
 
     sp = os.path.join(OUTPUT_DIR, "master_state_daily.csv")
     np_ = os.path.join(OUTPUT_DIR, "master_national_daily.csv")
+
+    # Append to existing files if they exist (Stateless Architecture)
+    if os.path.exists(sp):
+        old_state = pd.read_csv(sp)
+        master_state = pd.concat([old_state, master_state], ignore_index=True)
+        master_state = master_state.drop_duplicates(subset=["Date", "State"], keep='last')
+        master_state["_sort"] = pd.to_datetime(master_state["Date"], format="%d-%m-%Y", errors="coerce")
+        master_state = master_state.sort_values(["_sort", "Region", "State"]).drop(columns="_sort")
+
+    if os.path.exists(np_):
+        old_nat = pd.read_csv(np_)
+        master_nat = pd.concat([old_nat, master_nat], ignore_index=True)
+        master_nat = master_nat.drop_duplicates(subset=["Date"], keep='last')
+        if "Date" in master_nat.columns:
+            master_nat["_sort"] = pd.to_datetime(master_nat["Date"], format="%d-%m-%Y", errors="coerce")
+            master_nat = master_nat.sort_values("_sort").drop(columns="_sort")
+
     master_state.to_csv(sp,  index=False)
     master_nat.to_csv(np_,   index=False)
 

@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GridSight — .dockerignore
+# Prevents large / sensitive files from being sent to the Docker build context
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Version control
+.git
+.gitignore
+
+# Python artifacts
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.venv
+**/venv
+**/*.egg-info
+
+# Training & scraping (not needed in the server image)
+"Model Training"/
+weekly_pdfs/
+dataset/
+*.rar
+*.zip
+
+# Jupyter
+**/*.ipynb_checkpoints
+**/.ipynb_checkpoints
+
+# Frontend (built separately on Vercel)
+Interface/client/
+Interface/client/node_modules/
+Interface/client/.next/
+
+# Local env files
+.env
+.env.local
+*.env
+
+# Scratch / helper scripts
+patch_nb.py
+eval_model.py
+seed_logs.py
+
+# Logs
+processed_files.log
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

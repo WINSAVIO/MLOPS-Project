@@ -13,8 +13,11 @@ MASTER_FILE = r"C:\Users\Savio Winson\Desktop\Energy Consumption\dataset\master_
 # Ensure our checkpoint directory exists
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+import datetime
+
 DATE_START = "2023-04-01"
-DATE_END   = "2026-03-08"
+# Dynamically fetch up to today
+DATE_END   = datetime.date.today().strftime("%Y-%m-%d")
 
 # ---------------------------------------------------------------------------
 # THE NATIONAL LOAD CENTER DICTIONARY (39 Regions matched to GRID-INDIA)
@@ -153,10 +156,10 @@ BASE_URL = "https://archive-api.open-meteo.com/v1/archive"
 # ---------------------------------------------------------------------------
 # CORE FUNCTIONS (Reused from previous logic)
 # ---------------------------------------------------------------------------
-def fetch_city(city_name, lat, lon):
+def fetch_city(city_name, lat, lon, start_date=DATE_START, end_date=DATE_END):
     params = {
-        "latitude": lat, "longitude": lon, "start_date": DATE_START,
-        "end_date": DATE_END, "daily": ",".join(DAILY_VARS), "timezone": "Asia/Kolkata"
+        "latitude": lat, "longitude": lon, "start_date": start_date,
+        "end_date": end_date, "daily": ",".join(DAILY_VARS), "timezone": "Asia/Kolkata"
     }
     for attempt in range(1, 4):
         try:
@@ -169,10 +172,10 @@ def fetch_city(city_name, lat, lon):
             time.sleep(2 ** attempt)
     return pd.DataFrame()
 
-def process_state(state_name, load_centers):
+def process_state(state_name, load_centers, start_date=DATE_START, end_date=DATE_END):
     city_frames = {}
     for city, cfg in load_centers.items():
-        df = fetch_city(city, cfg["lat"], cfg["lon"])
+        df = fetch_city(city, cfg["lat"], cfg["lon"], start_date, end_date)
         if not df.empty:
             city_frames[city] = (df, cfg["weight"])
         time.sleep(1) # API Rate limit protection
@@ -225,20 +228,32 @@ def main():
     for state, load_centers in NATIONAL_LOAD_CENTRES.items():
         save_path = os.path.join(OUTPUT_DIR, f"climate_{state.replace(' ', '_')}.csv")
         
-        # 1. Checkpoint Logic
+        # 1. Append Logic (Stateless friendly)
+        start_date = DATE_START
+        old_df = None
         if os.path.exists(save_path):
-            print(f"⏭️ Skipping {state}... File already exists.")
-            df = pd.read_csv(save_path)
-            all_states_data.append(df)
-            continue
-            
-        print(f"📥 Fetching data for {state} ({len(load_centers)} Load Centers)...")
-        df = process_state(state, load_centers)
+            old_df = pd.read_csv(save_path)
+            if not old_df.empty:
+                max_date = pd.to_datetime(old_df["Date"], format="%d-%m-%Y").max()
+                # Start fetching from the day after the last recorded date
+                next_day = max_date + datetime.timedelta(days=1)
+                if next_day > pd.to_datetime(DATE_END):
+                    print(f"⏭️ Skipping {state}... Already up to date.")
+                    all_states_data.append(old_df)
+                    continue
+                start_date = next_day.strftime("%Y-%m-%d")
+
+        print(f"📥 Fetching data for {state} ({len(load_centers)} Load Centers) from {start_date} to {DATE_END}...")
+        df = process_state(state, load_centers, start_date, DATE_END)
         
-        if df is not None:
+        if df is not None and not df.empty:
+            if old_df is not None:
+                df = pd.concat([old_df, df], ignore_index=True)
             df.to_csv(save_path, index=False)
             all_states_data.append(df)
             print(f"   ✅ Saved {state}")
+        elif old_df is not None:
+            all_states_data.append(old_df)
         
         # 2. Rate Limiting Logic
         time.sleep(2) # Rest between states so Open-Meteo doesn't block us

@@ -1,0 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GridSight — Production Server Requirements
+# Only packages needed to RUN the FastAPI inference server.
+# Training / scraping dependencies are intentionally excluded to keep the
+# Docker image small and the attack surface minimal.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# API framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+pydantic==2.11.4
+
+# Rate limiting
+slowapi==0.1.9
+limits==5.8.0
+
+# ML inference
+xgboost==3.2.0
+scikit-learn==1.8.0
+numpy==2.4.3
+pandas==3.0.1
+joblib==1.5.3
+shap==0.48.0
+
+# Utilities
+python-dotenv==1.2.2

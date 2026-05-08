@@ -11,7 +11,8 @@ class ModelService:
     def __init__(self):
         try:
             print("Loading XGBoost Model Artifacts...")
-            base_path = r"C:\Users\Savio Winson\Desktop\Energy Consumption\Model Weights"
+            # Resolve Model Weights relative to this file — works locally AND inside Docker
+            base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Model Weights")
             
             self.booster = xgb.Booster()
             self.booster.load_model(os.path.join(base_path, "generalized_xgboost_model.json"))

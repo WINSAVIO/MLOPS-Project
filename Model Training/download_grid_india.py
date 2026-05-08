@@ -14,7 +14,7 @@ SSL_VERIFY = False
 # ---------------------------------------------------------------------------
 
 OUTPUT_DIR              = r"C:\Users\Savio Winson\Desktop\Energy Consumption\weekly_pdfs"
-YEARS_TO_DOWNLOAD       = ["2025-26", "2024-25", "2023-24"]
+YEARS_TO_DOWNLOAD       = ["2026-27", "2025-26", "2024-25", "2023-24"]
 SLEEP_BETWEEN_DOWNLOADS = 1.5
 SLEEP_AFTER_YEAR_SELECT = 4.0
 LISTING_URL             = "https://grid-india.in/en/reports/weekly-report"
@@ -69,7 +69,7 @@ def fetch_all_links() -> list[dict]:
     options.add_argument("--ignore-certificate-errors")
     options.add_argument("--headless=new")
 
-    driver = uc.Chrome(options=options)
+    driver = uc.Chrome(options=options, version_main=147)
     wait   = WebDriverWait(driver, 20)
     all_links = {}
 
@@ -140,12 +140,22 @@ def download_pdfs(links, output_dir):
     print(f"\n  Downloading {total} PDFs -> {output_dir}\n")
     session = requests.Session()
     session.headers.update(HEADERS)
+    
+    # Read processed logs (output_dir is in root/weekly_pdfs, so dirname is root)
+    log_path = os.path.join(os.path.dirname(output_dir), "processed_files.log")
+    processed_files = set()
+    if os.path.exists(log_path):
+        with open(log_path, "r") as f:
+            for line in f:
+                if line.strip() and not line.startswith("LAST_RUN") and not line.startswith("#"):
+                    processed_files.add(line.strip())
 
+    newly_downloaded = 0
     for i, item in enumerate(links, 1):
         url, filename = item["url"], item["filename"]
         out_path = os.path.join(output_dir, filename)
-        if os.path.exists(out_path):
-            print(f"  [{i:>3}/{total}] SKIP  {filename}")
+        if filename in processed_files:
+            print(f"  [{i:>3}/{total}] SKIP (In Log)  {filename}")
             skipped += 1
             continue
         try:
@@ -156,12 +166,14 @@ def download_pdfs(links, output_dir):
                     f.write(chunk)
             print(f"  [{i:>3}/{total}] OK    {filename}  ({os.path.getsize(out_path)//1024} KB)")
             done += 1
+            newly_downloaded += 1
         except Exception as e:
             print(f"  [{i:>3}/{total}] FAIL  {filename}  {e}")
             failed += 1
         time.sleep(SLEEP_BETWEEN_DOWNLOADS)
 
     print(f"\n  Done — {done} downloaded, {skipped} skipped, {failed} failed.\n")
+    return newly_downloaded
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +187,12 @@ def main():
     except Exception as e:
         print(f"\n  Fatal error: {e}\n")
         _tb.print_exc()
-        return
+        return 0
     if not links:
         print("\n  No links found.\n")
-        return
+        return 0
     print(f"\n  Total unique PDFs found: {len(links)}")
-    download_pdfs(links, OUTPUT_DIR)
+    return download_pdfs(links, OUTPUT_DIR)
 
 if __name__ == "__main__":
     main()
