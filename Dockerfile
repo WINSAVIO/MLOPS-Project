@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements-server.txt
 COPY Interface/server/ /app/
 
 # Copy model artifacts (inference-only weights, no training data)
-COPY "Model Weights/" "/app/Model Weights/"
+COPY ["Model Weights/", "/app/Model Weights/"]
 
 # Cloud Run requires the container to listen on $PORT (default 8080)
 ENV PORT=8080

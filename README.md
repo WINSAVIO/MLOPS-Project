@@ -1,4 +1,4 @@
-# Antigravity Energy Consumption Forecaster
+# GridSight: AI-Powered Energy Forecasting
 
 ## 🌍 Project Overview
 This project is an end-to-end MLOps pipeline designed to forecast short-term electricity consumption for Indian states. Moving beyond static, sanitized datasets, this system dynamically extracts multi-modal data (Energy, Climate, Calendar), engineers domain-specific features, and trains a Highly Generalized Explainable AI (XAI) model capable of predicting grid fluctuations.

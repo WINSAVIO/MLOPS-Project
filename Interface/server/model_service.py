@@ -7,23 +7,43 @@ import shap
 import numpy as np
 import os
 
+import traceback
+
 class ModelService:
     def __init__(self):
         try:
-            print("Loading XGBoost Model Artifacts...")
-            # Resolve Model Weights relative to this file — works locally AND inside Docker
+            now = datetime.datetime.now().isoformat()
+            print(f"[{now}] Loading XGBoost Model Artifacts...")
             base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Model Weights")
             
+            model_path = os.path.join(base_path, "generalized_xgboost_model.json")
+            print(f"[{now}] Attempting to load booster from {model_path}...")
             self.booster = xgb.Booster()
-            self.booster.load_model(os.path.join(base_path, "generalized_xgboost_model.json"))
+            self.booster.load_model(model_path)
+            print(f"[{now}] Booster loaded successfully.")
             
-            self.features = joblib.load(os.path.join(base_path, "model_features.pkl"))
-            self.state_baselines = joblib.load(os.path.join(base_path, "state_baselines.pkl"))
+            features_path = os.path.join(base_path, "model_features.pkl")
+            print(f"[{now}] Loading features from {features_path}...")
+            self.features = joblib.load(features_path)
             
-            self.explainer = shap.TreeExplainer(self.booster)
-            print("XGBoost Model & SHAP Explainer Loaded Successfully!")
+            baselines_path = os.path.join(base_path, "state_baselines.pkl")
+            print(f"[{now}] Loading baselines from {baselines_path}...")
+            self.state_baselines = joblib.load(baselines_path)
+            
+            try:
+                print(f"[{now}] Initializing SHAP TreeExplainer...")
+                self.explainer = shap.TreeExplainer(self.booster)
+                print(f"[{now}] SHAP Explainer Loaded Successfully!")
+            except Exception as se:
+                print(f"[{now}] Warning: SHAP failed to load, but model is active. Error: {se}")
+                print(traceback.format_exc())
+                self.explainer = None
+                
+            print(f"[{now}] Model Service Initialization Complete!")
         except Exception as e:
-            print(f"Warning: Could not load model artifacts. Running in fallback mode. Error: {e}")
+            now = datetime.datetime.now().isoformat()
+            print(f"[{now}] CRITICAL ERROR: Could not load model artifacts. Full fallback mode enabled. Error: {e}")
+            print(traceback.format_exc())
             self.booster = None
         
     def get_14_day_baseline(self):
@@ -67,12 +87,18 @@ class ModelService:
         dmatrix = xgb.DMatrix(df[self.features])
         prediction = self.booster.predict(dmatrix)[0]
         
-        # Calculate Real SHAP values
-        shap_vals = self.explainer.shap_values(df[self.features])[0]
-        
-        # Extract top 10 SHAP drivers for a fuller picture
-        top_indices = np.argsort(np.abs(shap_vals))[-10:][::-1]
-        top_shap = {self.features[i]: f"{shap_vals[i]:.2f} MU" for i in top_indices}
+        # Calculate SHAP values if explainer is available
+        if self.explainer is not None:
+            try:
+                shap_vals = self.explainer.shap_values(df[self.features])[0]
+                # Extract top 10 SHAP drivers for a fuller picture
+                top_indices = np.argsort(np.abs(shap_vals))[-10:][::-1]
+                top_shap = {self.features[i]: f"{shap_vals[i]:.2f} MU" for i in top_indices}
+            except Exception as e:
+                print(f"Runtime SHAP error: {e}")
+                top_shap = {"SHAP Error": str(e)}
+        else:
+            top_shap = {"SHAP status": "Model is active but SHAP explainer failed to load in container. Predictions are still accurate."}
         
         # Scale prediction back to MW using the dynamic baseline from the frontend UI
         baseline = getattr(scenario, "current_baseline_mw", 5000)

@@ -51,7 +51,8 @@ export default function Home() {
 
   const handlePredict = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/predict/scenario?state_name=${selectedState}`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${API_URL}/api/predict/scenario?state_name=${encodeURIComponent(selectedState)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -282,7 +283,7 @@ export default function Home() {
             
             {/* Map Title Feedback overlay - Moved to Top Right to avoid sidebar overlap */}
             <div style={{position: 'absolute', top: 20, right: 20, zIndex: 10, pointerEvents: 'none', textAlign: 'right'}}>
-              <h2 style={{margin: 0, color: '#f8fafc', fontSize: '1.5rem', textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>Energy Consumption of India</h2>
+              <h2 style={{margin: 0, color: '#f8fafc', fontSize: '1.5rem', textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>GridSight: India Energy Forecast</h2>
               <h3 style={{margin: 0, color: '#94a3b8', fontSize: '1.2rem', textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>{forecastData[selectedDayIdx].date.replace('\n', ' ')}</h3>
             </div>
             
