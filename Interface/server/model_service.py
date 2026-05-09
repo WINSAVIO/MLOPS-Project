@@ -14,8 +14,14 @@ class ModelService:
         try:
             now = datetime.datetime.now().isoformat()
             print(f"[{now}] Loading XGBoost Model Artifacts...")
-            # Look for Model Weights in the root directory
-            base_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "Model Weights")
+            # Robust path discovery for Model Weights (Local vs Docker)
+            possible_paths = [
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "Model Weights"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "Model Weights"),
+                os.path.join(os.getcwd(), "Model Weights")
+            ]
+            base_path = next((p for p in possible_paths if os.path.exists(p)), possible_paths[0])
+            print(f"[{now}] Using base_path: {base_path}")
             
             model_path = os.path.join(base_path, "generalized_xgboost_model.json")
             print(f"[{now}] Attempting to load booster from {model_path}...")
