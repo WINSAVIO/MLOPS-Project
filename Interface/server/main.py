@@ -11,7 +11,15 @@ from model_service import model_service
 # Initialize Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="GridSight API (14-Day Forecast)")
+# Disable Swagger/ReDoc in production to prevent schema leakage
+SHOW_DOCS = os.getenv("ENVIRONMENT") == "development"
+
+app = FastAPI(
+    title="GridSight API (14-Day Forecast)",
+    docs_url="/docs" if SHOW_DOCS else None,
+    redoc_url="/redoc" if SHOW_DOCS else None,
+    openapi_url="/openapi.json" if SHOW_DOCS else None
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

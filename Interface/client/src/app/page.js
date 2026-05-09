@@ -6,10 +6,13 @@ import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simp
 import styles from './page.module.css';
 
 // Mocked 14-Day Baseline Forecast for UI testing
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MOCK_14_DAY_BASELINE = Array.from({ length: 14 }).map((_, i) => {
   const base_mw = Math.floor(200000 + ((i * 12345) % 50000));
+  const d = new Date(2026, 4, 7 + i); // Starting May 7 2026
+  const label = `${String(d.getDate()).padStart(2,'0')} ${MONTHS[d.getMonth()]}`;
   return {
-    date: `0${(i % 9) + 7}/05/2026\n${['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][i % 7]}`,
+    date: label,
     baseline_mw: base_mw,
     original_baseline_mw: base_mw,
     features: {
@@ -18,7 +21,7 @@ const MOCK_14_DAY_BASELINE = Array.from({ length: 14 }).map((_, i) => {
       cloud_cover: Math.floor((i * 17) % 100),
       precipitation: Math.floor((i * 3) % 20),
       evapotranspiration: Math.floor((2 + ((i * 1.5) % 5)) * 10) / 10,
-      is_holiday: i % 7 === 3 // Sunday is holiday
+      is_holiday: i % 7 === 3
     }
   };
 });
@@ -74,7 +77,8 @@ export default function Home() {
         baseline_mw: Math.floor(data.predicted_mw)
       };
       setForecastData(newData);
-      setShapData(data.shap_values);
+      // Store the full response (baseline, drivers, total) in shapData
+      setShapData(data);
     } catch (err) {
       console.error(err);
     }
@@ -93,24 +97,26 @@ export default function Home() {
     const isHotState = ['Rajasthan', 'Gujarat', 'Madhya Pradesh', 'Maharashtra', 'Uttar Pradesh'].includes(stateName);
     
     let tempOffset = (stateHash % 10) - 5; 
-    if (isColdState) tempOffset -= 15; // Drop temps heavily
-    if (isHotState) tempOffset += 5; // Raise temps
+    if (isColdState) tempOffset -= 15; 
+    if (isHotState) tempOffset += 5; 
     
     const stateForecast = MOCK_14_DAY_BASELINE.map(day => {
         const generatedTemp = Math.floor((day.features.max_temperature + tempOffset) * 10) / 10;
+        const scaledBaseline = Math.floor(day.original_baseline_mw * scaleFactor);
         return {
             ...day,
-            baseline_mw: Math.floor(day.original_baseline_mw * scaleFactor),
-            original_baseline_mw: Math.floor(day.original_baseline_mw * scaleFactor),
+            baseline_mw: scaledBaseline,
+            original_baseline_mw: scaledBaseline,
             features: {
                ...day.features,
-               max_temperature: Math.min(43, Math.max(-5, generatedTemp)), // Clamp between -5C and 43C
+               max_temperature: Math.min(43, Math.max(-5, generatedTemp)),
                humidity: Math.floor(Math.min(100, Math.max(0, day.features.humidity + tempOffset * 2)))
             }
         };
     });
     setForecastData(stateForecast);
-    setScenario(stateForecast[selectedDayIdx].features); // Instantly update sliders!
+    setSelectedDayIdx(0); // Reset to first day on state change to avoid scale confusion
+    setScenario(stateForecast[0].features);
     setShapData(null);
   };
 
@@ -155,7 +161,7 @@ export default function Home() {
       <header className={`${styles.topBar} ${isTimelineOpen ? styles.topBarOpen : styles.topBarClosed}`}>
         <div className={styles.headerRow}>
           <h2 className={styles.timelineTitle}>
-            {isTimelineOpen ? `14-Day Forecast Timeline (${selectedState})` : `Dashboard: ${selectedState}`}
+            {isTimelineOpen ? `14-Day Power Demand Forecast (${selectedState})` : `Dashboard: ${selectedState}`}
           </h2>
           <button className={styles.toggleBtn} onClick={() => setIsTimelineOpen(!isTimelineOpen)}>
             {isTimelineOpen ? '▲ Collapse Timeline' : '▼ Expand Timeline'}
@@ -165,12 +171,35 @@ export default function Home() {
         {isTimelineOpen && (
           <div className={styles.chartContainer}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={forecastData}>
+              <LineChart data={forecastData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="date" stroke="#94a3b8" tick={{fontSize: 12}} />
-                <YAxis stroke="#94a3b8" />
-                <RechartsTooltip contentStyle={{backgroundColor: '#1e293b', border: '1px solid #475569'}} />
-                <Line type="monotone" dataKey="baseline_mw" stroke="#3b82f6" strokeWidth={3} activeDot={{ r: 8, onClick: (e, payload) => { if(payload) handleDayClick(payload.payload, payload.index); } }} />
+                <XAxis
+                  dataKey="date"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11, fill: '#94a3b8' }}
+                  interval={0}
+                  angle={-30}
+                  textAnchor="end"
+                  height={44}
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11, fill: '#94a3b8' }}
+                  tickFormatter={(v) => `${(v/1000).toFixed(0)}k MW`}
+                  width={68}
+                />
+                <RechartsTooltip
+                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }}
+                  formatter={(value) => [`${value.toLocaleString()} MW`, 'Energy Demand']}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="baseline_mw"
+                  stroke="#3b82f6"
+                  strokeWidth={3}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 7, onClick: (e, payload) => { if(payload) handleDayClick(payload.payload, payload.index); } }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -231,21 +260,60 @@ export default function Home() {
             <button className={styles.btnPrimary} onClick={handlePredict}>Predict</button>
           </div>
 
-          {/* SHAP Placeholder */}
+          {/* Power Bridge (SHAP) */}
           {viewMode === 'state' && (
             <div className={styles.shapContainer}>
-              <h3 style={{marginTop: 0}}>Explainability (SHAP)</h3>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                <h3 style={{margin: 0, fontSize: '0.9rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em'}}>Power Bridge (SHAP)</h3>
+                <span style={{fontSize: '0.7rem', color: '#64748b'}}>Inference: {selectedState}</span>
+              </div>
+
               {shapData ? (
-                <div>
-                  {Object.entries(shapData).map(([feature, impact]) => (
-                    <div key={feature} style={{display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem'}}>
-                      <span style={{color: '#94a3b8'}}>{feature}</span>
-                      <span style={{color: impact.includes('+') ? '#ef4444' : '#10b981', fontWeight: 'bold'}}>{impact}</span>
-                    </div>
-                  ))}
+                <div style={{display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
+                  
+                  {/* Baseline Row */}
+                  <div style={{
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    padding: '10px 12px', 
+                    background: 'rgba(255,255,255,0.03)', 
+                    borderRadius: '6px',
+                    border: '1px solid rgba(255,255,255,0.05)'
+                  }}>
+                    <span style={{color: '#94a3b8', fontSize: '0.85rem'}}>Scenario Baseline</span>
+                    <span style={{color: '#f8fafc', fontWeight: '600'}}>{Math.floor(shapData.baseline_mw).toLocaleString()} MW</span>
+                  </div>
+
+                  {/* Drivers */}
+                  <div style={{padding: '4px 12px', display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
+                    {Object.entries(shapData.shap_values).map(([feature, impact]) => (
+                      <div key={feature} style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem'}}>
+                        <span style={{color: '#cbd5e1'}}>{feature}</span>
+                        <span style={{color: impact.includes('+') ? '#f87171' : '#34d399', fontWeight: '500'}}>{impact}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Final Prediction Row */}
+                  <div style={{
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    padding: '12px', 
+                    background: 'rgba(59, 130, 246, 0.1)', 
+                    borderRadius: '8px',
+                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                    marginTop: '0.4rem'
+                  }}>
+                    <span style={{color: '#60a5fa', fontWeight: 'bold', fontSize: '0.9rem'}}>Predicted Demand</span>
+                    <span style={{color: '#60a5fa', fontWeight: 'bold', fontSize: '1.1rem'}}>{Math.floor(shapData.predicted_mw).toLocaleString()} MW</span>
+                  </div>
+
                 </div>
               ) : (
-                <p className={styles.placeholderText}>Click Predict to calculate Real SHAP values...</p>
+                <div style={{textAlign: 'center', padding: '2rem 0', color: '#475569'}}>
+                  <p style={{fontSize: '0.9rem', margin: 0}}>Adjust sliders and click Predict</p>
+                  <p style={{fontSize: '0.75rem'}}>to see the model's logic</p>
+                </div>
               )}
             </div>
           )}
@@ -283,7 +351,7 @@ export default function Home() {
             
             {/* Map Title Feedback overlay - Moved to Top Right to avoid sidebar overlap */}
             <div style={{position: 'absolute', top: 20, right: 20, zIndex: 10, pointerEvents: 'none', textAlign: 'right'}}>
-              <h2 style={{margin: 0, color: '#f8fafc', fontSize: '1.5rem', textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>GridSight: India Energy Forecast</h2>
+              <h2 style={{margin: 0, color: '#f8fafc', fontSize: '1.5rem', textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>GridSight: India Power Demand</h2>
               <h3 style={{margin: 0, color: '#94a3b8', fontSize: '1.2rem', textShadow: '2px 2px 4px rgba(0,0,0,0.8)'}}>{forecastData[selectedDayIdx].date.replace('\n', ' ')}</h3>
             </div>
             
@@ -303,7 +371,6 @@ export default function Home() {
             
             {/* key={selectedDayIdx} forces the SVG map to fully re-render so heatmap colors instantly change on day click! */}
             <ComposableMap key={selectedDayIdx} projection="geoMercator" projectionConfig={{ scale: 1000, center: [80, 22] }} style={{width: "100%", height: "100%"}}>
-              {/* Removed hardcoded zoom so states are never cropped. User can drag/zoom freely. */}
               <ZoomableGroup zoom={1} center={[80, 22]}>
                 <Geographies geography="/india.topo.json">
                   {({ geographies }) =>
@@ -340,6 +407,38 @@ export default function Home() {
                 </Geographies>
               </ZoomableGroup>
             </ComposableMap>
+
+            {/* Heatmap Legend — Bottom Right */}
+            <div style={{
+              position: 'absolute',
+              bottom: 20,
+              right: 20,
+              background: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '10px',
+              padding: '12px 16px',
+              zIndex: 50,
+              pointerEvents: 'none',
+              minWidth: 160
+            }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Power Demand</p>
+              {[
+                { color: '#b91c1c', label: '> 100,000 MW', tier: 'Very High' },
+                { color: '#ef4444', label: '80k – 100k MW', tier: 'High' },
+                { color: '#f59e0b', label: '60k – 80k MW',  tier: 'Medium' },
+                { color: '#fde047', label: '40k – 60k MW',  tier: 'Low' },
+                { color: '#fef08a', label: '< 40,000 MW',   tier: 'Very Low' },
+              ].map(({ color, label, tier }) => (
+                <div key={tier} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: 3, background: color, flexShrink: 0, border: '1px solid rgba(255,255,255,0.15)' }} />
+                  <div>
+                    <span style={{ fontSize: '0.72rem', color: '#f8fafc', display: 'block', lineHeight: 1.2 }}>{tier}</span>
+                    <span style={{ fontSize: '0.65rem', color: '#64748b', display: 'block' }}>{label}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </main>
       </div>
