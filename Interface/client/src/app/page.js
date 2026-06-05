@@ -1,44 +1,71 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
 import styles from './page.module.css';
 
-// Mocked 14-Day Baseline Forecast for UI testing
+// 14-Day Baseline Forecast — always starts from TODAY so dates never go stale
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const MOCK_14_DAY_BASELINE = Array.from({ length: 14 }).map((_, i) => {
-  const base_mw = Math.floor(200000 + ((i * 12345) % 50000));
-  const d = new Date(2026, 4, 7 + i); // Starting May 7 2026
-  const label = `${String(d.getDate()).padStart(2,'0')} ${MONTHS[d.getMonth()]}`;
-  return {
-    date: label,
-    baseline_mw: base_mw,
-    original_baseline_mw: base_mw,
-    features: {
-      max_temperature: Math.floor((30 + ((i * 7) % 15)) * 10) / 10,
-      humidity: Math.floor(40 + ((i * 13) % 40)),
-      cloud_cover: Math.floor((i * 17) % 100),
-      precipitation: Math.floor((i * 3) % 20),
-      evapotranspiration: Math.floor((2 + ((i * 1.5) % 5)) * 10) / 10,
-      is_holiday: i % 7 === 3
-    }
-  };
-});
+
+function buildBaseline() {
+  return Array.from({ length: 14 }).map((_, i) => {
+    const base_mw = Math.floor(200000 + ((i * 12345) % 50000));
+    const d = new Date();
+    d.setDate(d.getDate() + i);          // starts from today, not hardcoded May 7
+    const label = `${String(d.getDate()).padStart(2,'0')} ${MONTHS[d.getMonth()]}`;
+    return {
+      date: label,
+      baseline_mw: base_mw,
+      original_baseline_mw: base_mw,
+      features: {
+        max_temperature: Math.floor((30 + ((i * 7) % 15)) * 10) / 10,
+        humidity:        Math.floor(40 + ((i * 13) % 40)),
+        cloud_cover:     Math.floor((i * 17) % 100),
+        precipitation:   Math.floor((i * 3) % 20),
+        evapotranspiration: Math.floor((2 + ((i * 1.5) % 5)) * 10) / 10,
+        is_holiday: i % 7 === 3
+      }
+    };
+  });
+}
+
+const MOCK_14_DAY_BASELINE = buildBaseline();
 
 export default function Home() {
-  const [viewMode, setViewMode] = useState('national'); // 'national' | 'state'
+  const [viewMode, setViewMode] = useState('national');
   const [selectedState, setSelectedState] = useState('All-India');
   const [hoveredState, setHoveredState] = useState('');
   const [shapData, setShapData] = useState(null);
-  
+
+  // Default both panels open on desktop; collapse on mobile
   const [isTimelineOpen, setIsTimelineOpen] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile on mount and on resize
+  useEffect(() => {
+    const check = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setIsTimelineOpen(false);
+        setIsSidebarOpen(false);
+      }
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const [forecastData, setForecastData] = useState(MOCK_14_DAY_BASELINE);
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
-  
   const [scenario, setScenario] = useState(MOCK_14_DAY_BASELINE[0].features);
+
+  // Controlled map position — zoom + center tracked in state so maxZoom/minZoom
+  // are actually enforced by react-simple-maps (uncontrolled zoom={1} lets d3 run free).
+  const MAP_DEFAULT = { coordinates: [80, 22], zoom: 1 };
+  const [mapPosition, setMapPosition] = useState(MAP_DEFAULT);
 
   const handleDayClick = (data, index) => {
     if(index !== undefined) {
@@ -130,6 +157,7 @@ export default function Home() {
     setForecastData(MOCK_14_DAY_BASELINE);
     setScenario(MOCK_14_DAY_BASELINE[selectedDayIdx].features);
     setShapData(null);
+    setMapPosition(MAP_DEFAULT);   // also reset zoom + pan back to India view
   };
 
   const getHeatmapColor = (stateName) => {
@@ -167,41 +195,45 @@ export default function Home() {
             {isTimelineOpen ? '▲ Collapse Timeline' : '▼ Expand Timeline'}
           </button>
         </div>
-        
+
         {isTimelineOpen && (
-          <div className={styles.chartContainer}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={forecastData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  stroke="#94a3b8"
-                  tick={{ fontSize: 11, fill: '#94a3b8' }}
-                  interval={0}
-                  angle={-30}
-                  textAnchor="end"
-                  height={44}
-                />
-                <YAxis
-                  stroke="#94a3b8"
-                  tick={{ fontSize: 11, fill: '#94a3b8' }}
-                  tickFormatter={(v) => `${(v/1000).toFixed(0)}k MW`}
-                  width={68}
-                />
-                <RechartsTooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }}
-                  formatter={(value) => [`${value.toLocaleString()} MW`, 'Energy Demand']}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="baseline_mw"
-                  stroke="#3b82f6"
-                  strokeWidth={3}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 7, onClick: (e, payload) => { if(payload) handleDayClick(payload.payload, payload.index); } }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+          /* On mobile: scrollable wrapper → fixed-width inner → chart fills inner width */
+          /* On desktop: ResponsiveContainer fills 100% normally */
+          <div className={styles.chartScrollWrapper}>
+            <div className={styles.chartInner}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={forecastData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#94a3b8"
+                    tick={{ fontSize: 11, fill: '#94a3b8' }}
+                    interval={0}
+                    angle={-30}
+                    textAnchor="end"
+                    height={44}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    tick={{ fontSize: 11, fill: '#94a3b8' }}
+                    tickFormatter={(v) => `${(v/1000).toFixed(0)}k MW`}
+                    width={68}
+                  />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }}
+                    formatter={(value) => [`${value.toLocaleString()} MW`, 'Energy Demand']}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="baseline_mw"
+                    stroke="#3b82f6"
+                    strokeWidth={3}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 7, onClick: (e, payload) => { if(payload) handleDayClick(payload.payload, payload.index); } }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
       </header>
@@ -370,8 +402,21 @@ export default function Home() {
             )}
             
             {/* key={selectedDayIdx} forces the SVG map to fully re-render so heatmap colors instantly change on day click! */}
-            <ComposableMap key={selectedDayIdx} projection="geoMercator" projectionConfig={{ scale: 1000, center: [80, 22] }} style={{width: "100%", height: "100%"}}>
-              <ZoomableGroup zoom={1} center={[80, 22]}>
+            <ComposableMap
+              key={selectedDayIdx}
+              projection="geoMercator"
+              projectionConfig={{ scale: isMobile ? 500 : 1000, center: [80, 22] }}
+              style={{width: "100%", height: "100%"}}
+            >
+              <ZoomableGroup
+                zoom={mapPosition.zoom}
+                center={mapPosition.coordinates}
+                onMoveEnd={setMapPosition}
+                minZoom={0.8}
+                maxZoom={4}
+                filterZoomEvent={(e) => e.type !== 'dblclick'}
+                translateExtent={[[-200, -200], [1000, 800]]}
+              >
                 <Geographies geography="/india.topo.json">
                   {({ geographies }) =>
                     geographies.map((geo) => {

@@ -49,6 +49,15 @@ class ScenarioRequest(BaseModel):
 def health_check():
     return {"status": "ok"}
 
+@app.get("/api/health")
+def server_health():
+    """
+    Detailed status endpoint — reports model state, last retrain date,
+    and whether a retraining cycle is due. Not rate-limited so monitoring
+    tools can poll it freely.
+    """
+    return model_service.get_health_info()
+
 @app.get("/api/forecast/baseline")
 @limiter.limit("60/minute")
 def get_baseline_forecast(request: Request):

@@ -42,10 +42,30 @@
   color: var(--foreground);
 }
 
-.chartContainer {
+/* ─── Chart Scroll Wrapper (timeline) ────────────────────────────────────── */
+/* Desktop: fills full width normally via ResponsiveContainer               */
+/* Mobile:  allows horizontal scroll so all 14 date labels stay readable    */
+.chartScrollWrapper {
   flex: 1;
   width: 100%;
   min-height: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Hide scrollbar visually but keep it functional */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.chartScrollWrapper::-webkit-scrollbar {
+  height: 4px;
+}
+.chartScrollWrapper::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 2px;
+}
+
+.chartInner {
+  height: 100%;
+  min-width: 100%;   /* fills naturally on desktop */
 }
 
 /* ─── Main Content Area ───────────────────────────────────────────────────── */
@@ -268,15 +288,20 @@
     overflow: hidden;
   }
 
-  /* Map fills remaining vertical space */
+  /* Map fills remaining vertical space — priority on mobile */
   .main {
     flex: 1;
-    min-height: 40vh;
+    min-height: 50vh;
   }
 
   /* Smaller chart in timeline */
   .topBarOpen {
-    height: 180px;
+    height: 200px;
+  }
+
+  /* On mobile the chart inner needs a fixed width so all 14 dates show */
+  .chartInner {
+    min-width: 700px;
   }
 
   .timelineTitle {

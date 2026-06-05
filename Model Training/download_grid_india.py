@@ -69,7 +69,7 @@ def fetch_all_links() -> list[dict]:
     options.add_argument("--ignore-certificate-errors")
     options.add_argument("--headless=new")
 
-    driver = uc.Chrome(options=options, version_main=147)
+    driver = uc.Chrome(options=options)  # auto-detects installed Chrome version
     wait   = WebDriverWait(driver, 20)
     all_links = {}
 

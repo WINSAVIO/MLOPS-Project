@@ -1,5 +1,4 @@
 import datetime
-import random
 import xgboost as xgb
 import joblib
 import pandas as pd
@@ -46,11 +45,58 @@ class ModelService:
                 self.explainer = None
                 
             print(f"[{now}] Model Service Initialization Complete!")
+            self.loaded_at = datetime.datetime.now().isoformat()
         except Exception as e:
             now = datetime.datetime.now().isoformat()
             print(f"[{now}] CRITICAL ERROR: Could not load model artifacts: {e}")
             self.booster = None
-        
+            self.loaded_at = None
+
+    def _get_log_file_path(self):
+        """Resolve processed_files.log regardless of environment (local vs Docker)."""
+        possible_roots = [
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.getcwd(),
+        ]
+        for root in possible_roots:
+            candidate = os.path.join(root, "processed_files.log")
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def get_health_info(self):
+        """Return server/model status including last retraining date."""
+        last_trained_str = "Never"
+        days_since = None
+        retrain_due = True
+
+        log_path = self._get_log_file_path()
+        if log_path:
+            try:
+                with open(log_path, "r") as f:
+                    for line in f:
+                        if line.startswith("LAST_RUN:"):
+                            last_trained_str = line.split("LAST_RUN:")[1].strip()
+                            break
+                if last_trained_str != "Never":
+                    last_dt = datetime.datetime.strptime(last_trained_str, "%Y-%m-%d %H:%M:%S")
+                    days_since = (datetime.datetime.now() - last_dt).days
+                    retrain_due = days_since >= 14
+            except Exception as e:
+                last_trained_str = f"Error reading log: {e}"
+
+        return {
+            "status": "ok",
+            "model_loaded": self.booster is not None,
+            "shap_enabled": self.explainer is not None,
+            "last_trained": last_trained_str,
+            "days_since_training": days_since,
+            "retrain_due": retrain_due,
+            "server_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "model_loaded_at": getattr(self, 'loaded_at', None),
+        }
+
     def get_14_day_baseline(self):
         return {"status": "success", "message": "14-day baseline returned"}
         
